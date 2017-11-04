@@ -1,0 +1,5 @@
+1 remote00.cs.binghamton.edu 5000 5001 
+2 remote00.cs.binghamton.edu 5002 5003
+3 remote01.cs.binghamton.edu 5000 5001
+4 remote01.cs.binghamton.edu 5002 5003
+5 remote03.cs.binghamton.edu 5004 5005
