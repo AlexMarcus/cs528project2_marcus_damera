@@ -1,5 +1,6 @@
 #include "node.h"
 
+using namespace std;
 /*
 class Node{
 
@@ -21,8 +22,14 @@ Node::Node(int id, int c_port, int d_port, std::string hname){
   control_port_ = c_port;
   data_port_ = d_port;
   hostname_ = hname;
+
+  cout << "Creating Node: " << id << " cport: " << c_port << " dport: " << d_port << " hostname: " << hname << endl;
 }
 
-int Node::AddNeighbor(Node neighbor){return 0;}
+int Node::AddNeighbor(Node *neighbor){
+  neighbors_.push_back(neighbor);
+  cout << "Added Neighbor" << endl;
+  return 0;
+}
 
 int Node::RemoveNeighbor(int id){return 0;}
