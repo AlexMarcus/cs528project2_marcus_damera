@@ -27,13 +27,6 @@ using namespace std;
 vector<tuple<int, int, int>> distance_vectors;
 pthread_mutex_t mutex; //used whenever accessing/updates any value in distance_vectors
 
-
-
-struct NetworkData {
-  int port;
-  string hostname;
-};
-
 void *DataPortThread(void *);
 void *ControlPortThread(void *);
 
@@ -105,7 +98,7 @@ int main(int argc, char **argv){
 	  }
 	  count++;
 	}
-	Node *neighbor_node = new Node(id_, control_port_, data_port_, hostname_);
+	Node * neighbor_node = new Node(id_, control_port_, data_port_, hostname_);
 	this_node->AddNeighbor(neighbor_node);
       }     
     }
@@ -114,8 +107,8 @@ int main(int argc, char **argv){
   pthread_t data_thread, control_thread;
   int rv;
 
-  rv = pthread_create(&data_thread, NULL, &DataPortThread, (void *) &this_node); assert(rv==0);
-  rv = pthread_create(&control_thread, NULL, &ControlPortThread, (void *) &this_node); assert(rv==0);
+  rv = pthread_create(&data_thread, NULL, &DataPortThread, (void *) this_node); assert(rv==0);
+  rv = pthread_create(&control_thread, NULL, &ControlPortThread, (void *) this_node); assert(rv==0);
 
   rv = pthread_join(data_thread, NULL); assert(rv==0);
   rv = pthread_join(control_thread, NULL); assert(rv==0);  
@@ -152,19 +145,90 @@ void *ControlPortThread(void *args){
   
   rv = bind(sd, (struct sockaddr *) &sa, sizeof(sa)); assert(rv ==0);
 
-  int interval = 1;
+  int interval = 5;
   
-  time_t start_time, now, prev;
-  start_time = time(NULL);
-  prev = start_time;
+  time_t now, prev;
+  prev = time(NULL);
+
+  //Initialize the FD Sets used for select()
+  fd_set master, read_fds;
+
+  int fdmax = sd;
+
+  FD_ZERO(&master);
+  FD_ZERO(&read_fds);
+
+  vector<Node *> vec = node_data->GetNeighbors();
+  
+  /*
+  for(i=0; i < node_data->GetNeighbors().size();i++){
+    struct sockaddr_in neighbor_addr;
+    struct hostent *h = gethostbyname((const char *) node_data->GetNeighbors()[i]->GetHostname().c_str());
+
+    memcpy(&neighbor_addr.sin_addr.s_addr, h->h_addr, h->h_length);
+    neighbor_addr.sin_family = AF_INET;
+    neighbor_addr.sin_port = htons(node_data->GetNeighbors()[i]->GetControlPort());
+
+    cout << 
+    nsd = socket(AF_INET, SOCK_DGRAM, 0); assert(nsd > 0);
+    rv = bind(nsd, (struct sockaddr *) &neighbor_addr, sizeof(neighbor_addr)); assert(rv == 0);
+
+    cout << "Created Socket: " << nsd << ", Hostname: " << node_data->GetNeighbors()[i]->GetHostname() << ", Port: " << node_data->GetNeighbors()[i]->GetControlPort() << endl;
+
+    FD_SET(nsd, &master);
+    
+    if(nsd > fdmax) fdmax = nsd;
+    
+  }
+  */
+  
+  unsigned int address_length = sizeof(struct sockaddr);
+  
+  FD_SET(sd, &master);
+
+  struct timeval tv;
   
   while(1){
+    
+    read_fds = master;
+    
+    tv.tv_sec = 5;
+    tv.tv_usec = 500000;
+    
     now = time(NULL);
-    if(now - start_time > 10){interval = 5;}
     if(now - prev > interval){
-      cout << "Do something" << endl;
+      for(i=0; i < node_data->GetNeighbors().size();i++){
+	struct sockaddr_in neighbor_addr;
+	struct hostent *h = gethostbyname((const char *) node_data->GetNeighbors()[i]->GetHostname().c_str());
+
+	memcpy(&neighbor_addr.sin_addr.s_addr, h->h_addr, h->h_length);
+	neighbor_addr.sin_family = AF_INET;
+	neighbor_addr.sin_port = htons(node_data->GetNeighbors()[i]->GetControlPort());
+
+	ssize_t sendsize;
+
+
+	const char buf[100] = "Hello there homie";
+	sendsize = sendto(sd, buf, 100, 0, (struct sockaddr *) neighbor_addr, address_length);
+      }
       prev = now;
     }
+    
+    rv = select(fdmax+1, &read_fds, NULL, NULL, &tv);
+    if(rv < 0) cout << "Select ERROR!" << endl;
+    else if(rv == 0) cout << "Timeout" << endl;
+    else{
+      ssize_t recsize;
+      struct sockaddr_in node_addr;
+      char recv_data[1024];
+
+      if(FD_ISSET(sd, &read_fds)){
+	recsize = recvfrom(sd, recv_data, 1024, 0, (struct sockaddr *) &node_addr, &address_length);
+	cout << "Size of message" << recsize << endl;
+	cout << recv_data << endl;
+      }
+    }
+    
   }
   
   //wait for incoming messages

@@ -4,7 +4,8 @@ TODO:
 
 ALEX:
 	- DATA THREAD
-	- Set up the sockets and create nodes
+	- Set up the sockets and create nodes (DONE)
+	- Set up packet type
 	
 
 KUMARA:
