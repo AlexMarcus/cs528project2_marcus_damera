@@ -19,6 +19,11 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#define CSIZE 1027
+#define DSIZE 1028
+
+
+
 using namespace std;
 
 //Global variables:
@@ -40,17 +45,20 @@ int main(int argc, char **argv){
 
   ifstream file("config.txt");
 
-  Node *this_node;
+  file.clear();
+  file.seekg(0, file.beg);
+
+  Node * this_node;
   vector<int> neighbors;
   //figures out info about THIS node
   
   string line;
   while(getline(file,line)){
+    cout << line << endl;
     istringstream iss(line);
     
     string token;
     getline(iss,token,'\t');
-
     if(id == stoi(token)){
       getline(iss,token,'\t');
       this_node =  new Node(id, cport, dport, token);
@@ -65,45 +73,48 @@ int main(int argc, char **argv){
 	  break;
 	default:
 	  neighbors.push_back(stoi(token));
+	  cout << "neighbor: " << stoi(token) << endl; 
+	  break;
 	}
 	count++;
       }
     }
+  }
 
-    file.clear();
-    file.seekg(0, file.beg); //points to beginning of file to get info about neighbors
-
-    while(getline(file,line)){
-      int id_, control_port_, data_port_;
-      string hostname_;
-
-      istringstream iss(line);
-
-      string token;
-      getline(iss,token,'\t');
-      if(find(neighbors.begin(), neighbors.end(), stoi(token)) != neighbors.end()){
-	id_ = stoi(token);
-	int count = 1;
-	while(getline(iss,token,'\t')){
-	  switch(count){
-	  case 1:
-	    hostname_ = token;
-	    break;
-	  case 2:
-	    control_port_ = stoi(token);
-	    break;
-	  case 3:
-	    data_port_ = stoi(token);
-	    break;
-	  }
-	  count++;
+  file.clear();
+  file.seekg(0, file.beg); //points to beginning of file to get info about neighbors
+  
+  while(getline(file,line)){
+    int id_, control_port_, data_port_;
+    string hostname_;
+    
+    istringstream iss(line);
+    
+    string token;
+    getline(iss,token,'\t');
+    //cout << "" << stoi(token) << endl;
+    if(find(neighbors.begin(), neighbors.end(), stoi(token)) != neighbors.end()){
+      id_ = stoi(token);
+      int count = 1;
+      while(getline(iss,token,'\t')){
+	switch(count){
+	case 1:
+	  hostname_ = token;
+	  break;
+	case 2:
+	  control_port_ = stoi(token);
+	  break;
+	case 3:
+	  data_port_ = stoi(token);
+	  break;
 	}
-	Node * neighbor_node = new Node(id_, control_port_, data_port_, hostname_);
-	this_node->AddNeighbor(neighbor_node);
-      }     
+	count++;
+      }
+      Node * neighbor_node = new Node(id_, control_port_, data_port_, hostname_);
+      this_node->AddNeighbor(neighbor_node);
     }
   }
-  
+
   pthread_t data_thread, control_thread;
   int rv;
 
@@ -117,11 +128,8 @@ int main(int argc, char **argv){
 }
 
 void *DataPortThread(void *args){
+
   Node *node_data = (Node *) args;
-
-
-
-  
   cout << "DataportThread" << endl;
   
 }
@@ -145,48 +153,22 @@ void *ControlPortThread(void *args){
   
   rv = bind(sd, (struct sockaddr *) &sa, sizeof(sa)); assert(rv ==0);
 
-  int interval = 5;
-  
+  //periodically send this nodes distance vector every <interval> seconds
+  int interval = 5;  
   time_t now, prev;
   prev = time(NULL);
 
   //Initialize the FD Sets used for select()
   fd_set master, read_fds;
-
   int fdmax = sd;
 
   FD_ZERO(&master);
   FD_ZERO(&read_fds);
 
-  vector<Node *> vec = node_data->GetNeighbors();
-  
-  /*
-  for(i=0; i < node_data->GetNeighbors().size();i++){
-    struct sockaddr_in neighbor_addr;
-    struct hostent *h = gethostbyname((const char *) node_data->GetNeighbors()[i]->GetHostname().c_str());
-
-    memcpy(&neighbor_addr.sin_addr.s_addr, h->h_addr, h->h_length);
-    neighbor_addr.sin_family = AF_INET;
-    neighbor_addr.sin_port = htons(node_data->GetNeighbors()[i]->GetControlPort());
-
-    cout << 
-    nsd = socket(AF_INET, SOCK_DGRAM, 0); assert(nsd > 0);
-    rv = bind(nsd, (struct sockaddr *) &neighbor_addr, sizeof(neighbor_addr)); assert(rv == 0);
-
-    cout << "Created Socket: " << nsd << ", Hostname: " << node_data->GetNeighbors()[i]->GetHostname() << ", Port: " << node_data->GetNeighbors()[i]->GetControlPort() << endl;
-
-    FD_SET(nsd, &master);
-    
-    if(nsd > fdmax) fdmax = nsd;
-    
-  }
-  */
-  
-  unsigned int address_length = sizeof(struct sockaddr);
-  
   FD_SET(sd, &master);
 
   struct timeval tv;
+  unsigned int address_length = sizeof(struct sockaddr);
   
   while(1){
     
@@ -197,6 +179,7 @@ void *ControlPortThread(void *args){
     
     now = time(NULL);
     if(now - prev > interval){
+      int i;
       for(i=0; i < node_data->GetNeighbors().size();i++){
 	struct sockaddr_in neighbor_addr;
 	struct hostent *h = gethostbyname((const char *) node_data->GetNeighbors()[i]->GetHostname().c_str());
@@ -207,9 +190,16 @@ void *ControlPortThread(void *args){
 
 	ssize_t sendsize;
 
-
-	const char buf[100] = "Hello there homie";
-	sendsize = sendto(sd, buf, 100, 0, (struct sockaddr *) neighbor_addr, address_length);
+	char buf[CSIZE];
+	buf[0] = node_data->GetID();
+	buf[1] = node_data->GetNeighbors()[i]->GetID();
+	buf[2] = 1;
+       
+	char * buf_ptr = (char *) buf;
+	buf_ptr += 3;
+	
+	sprintf(buf_ptr, "Hello there homie! From: %d", node_data->GetID());
+	sendsize = sendto(sd, buf, CSIZE, 0, (struct sockaddr *) &neighbor_addr, address_length);
       }
       prev = now;
     }
@@ -223,9 +213,14 @@ void *ControlPortThread(void *args){
       char recv_data[1024];
 
       if(FD_ISSET(sd, &read_fds)){
-	recsize = recvfrom(sd, recv_data, 1024, 0, (struct sockaddr *) &node_addr, &address_length);
-	cout << "Size of message" << recsize << endl;
-	cout << recv_data << endl;
+	recsize = recvfrom(sd, recv_data, CSIZE, 0, (struct sockaddr *) &node_addr, &address_length);
+	cout << "\nSize of message " << recsize << endl;
+	int source_id = (int) recv_data[0];
+	int dest_id = (int) recv_data[1];
+	int type = (int) recv_data[2];
+	char * data = ((char *) recv_data) + 3;
+	cout << "Source: " << source_id << ", Dest: " << dest_id << ", Type: " << type << endl;
+	cout << data << endl;
       }
     }
     
