@@ -45,7 +45,6 @@ int main(int argc, char **argv){
     string token;
     int id, cport, dport;
     string hostname;
-    cout << line << endl;
     getline(iss,token,'\t');
     id = stoi(token);
     getline(iss,token,'\t');
@@ -96,9 +95,106 @@ int main(int argc, char **argv){
 	sendsize = sendto(sd, buf, CSIZE, 0, (struct sockaddr *) &addr, address_length);
       }
     }
-    if(i==nodes.size()-1){cout << "No such node" << endl;}
+    
   }
+  else if(command == "create-link"){
+    for(i=0;i<nodes.size();i++){
+      if(nodes[i]->GetID() == node1){
 
-  return 0;
+	struct sockaddr_in addr;
+	struct hostent *h = gethostbyname((const char *) nodes[i]->GetHostname().c_str());
+
+	memcpy(&addr.sin_addr.s_addr, h->h_addr, h->h_length);
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(nodes[i]->GetControlPort());
+
+	ssize_t sendsize;
+	unsigned int address_length = sizeof(struct sockaddr);
+
+	char buf[CSIZE];
+	buf[0] = node1;
+	buf[1] = node2;
+	buf[2] = 3;
+
+	sendsize = sendto(sd, buf, CSIZE, 0, (struct sockaddr *) &addr, address_length);
+      }
+    }
+    
   
+    //send again to node2
+  
+    for(i=0;i<nodes.size();i++){
+      if(nodes[i]->GetID() == node2){
+	
+	struct sockaddr_in addr;
+	struct hostent *h = gethostbyname((const char *) nodes[i]->GetHostname().c_str());
+	
+	memcpy(&addr.sin_addr.s_addr, h->h_addr, h->h_length);
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(nodes[i]->GetControlPort());
+	
+	ssize_t sendsize;
+	unsigned int address_length = sizeof(struct sockaddr);
+	
+	char buf[CSIZE];
+	buf[0] = node2;
+	buf[1] = node1;
+	buf[2] = 3;
+      
+	sendsize = sendto(sd, buf, CSIZE, 0, (struct sockaddr *) &addr, address_length);
+      }
+      
+    }
+  }
+  else if(command == "remove-link"){
+    for(i=0;i<nodes.size();i++){
+      if(nodes[i]->GetID() == node1){
+	
+	struct sockaddr_in addr;
+	struct hostent *h = gethostbyname((const char *) nodes[i]->GetHostname().c_str());
+	
+	memcpy(&addr.sin_addr.s_addr, h->h_addr, h->h_length);
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(nodes[i]->GetControlPort());
+	
+	ssize_t sendsize;
+	unsigned int address_length = sizeof(struct sockaddr);
+	
+	char buf[CSIZE];
+	buf[0] = node1;
+	buf[1] = node2;
+	buf[2] = 4;
+	
+	sendsize = sendto(sd, buf, CSIZE, 0, (struct sockaddr *) &addr, address_length);
+      }
+    }
+    
+  
+    //send again to node2
+  
+    for(i=0;i<nodes.size();i++){
+      if(nodes[i]->GetID() == node2){
+	
+	struct sockaddr_in addr;
+	struct hostent *h = gethostbyname((const char *) nodes[i]->GetHostname().c_str());
+	
+	memcpy(&addr.sin_addr.s_addr, h->h_addr, h->h_length);
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(nodes[i]->GetControlPort());
+	
+	ssize_t sendsize;
+	unsigned int address_length = sizeof(struct sockaddr);
+	
+	char buf[CSIZE];
+	buf[0] = node2;
+	buf[1] = node1;
+	buf[2] = 4;
+      
+	sendsize = sendto(sd, buf, CSIZE, 0, (struct sockaddr *) &addr, address_length);
+      }
+    }
+  }
+  
+  return 0;
+    
 }

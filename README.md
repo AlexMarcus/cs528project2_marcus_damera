@@ -1,19 +1,15 @@
 Networks Programming Assignment #2
 
-TODO:
 
-ALEX:
-	- DATA THREAD
-	- Set up the sockets and create nodes (DONE)
-	- Set up packet type
-	
+running make yields 2 execs: node and client
 
-KUMARA:
-	- CONTROL THREAD
-	- Code to calculate distance vectors (can be implemented in another sample file with dummy data for testing
+run node like:
 
+~$ ./node <node id> <control port> <data port>
 
-MEETING MONDAY:
-	- Meet on Monday to discuss:
-	- how to send packages size, headers, etc...
-	
+This program will make sure the data you entered matches the data in config.txt
+
+run client like:
+
+~$ ./client <command> <Source Node ID> <Destination Node ID>
+

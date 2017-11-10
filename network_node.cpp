@@ -20,7 +20,7 @@
 #include <sys/types.h>
 
 #define CSIZE 1027
-#define DSIZE 1028
+#define DSIZE 1043
 
 
 
@@ -30,7 +30,8 @@ using namespace std;
 //vector of tuples representing each this nodes distance vector
 
 vector<tuple<int, int, int>> distance_vectors;
-pthread_mutex_t mutex; //used whenever accessing/updates any value in distance_vectors
+Node * this_node;
+
 
 void *DataPortThread(void *);
 void *ControlPortThread(void *);
@@ -48,13 +49,12 @@ int main(int argc, char **argv){
   file.clear();
   file.seekg(0, file.beg);
 
-  Node * this_node;
+  //Node * this_node;
   vector<int> neighbors;
   //figures out info about THIS node
   
   string line;
   while(getline(file,line)){
-    cout << line << endl;
     istringstream iss(line);
     
     string token;
@@ -73,7 +73,6 @@ int main(int argc, char **argv){
 	  break;
 	default:
 	  neighbors.push_back(stoi(token));
-	  cout << "neighbor: " << stoi(token) << endl; 
 	  break;
 	}
 	count++;
@@ -118,8 +117,8 @@ int main(int argc, char **argv){
   pthread_t data_thread, control_thread;
   int rv;
 
-  rv = pthread_create(&data_thread, NULL, &DataPortThread, (void *) this_node); assert(rv==0);
-  rv = pthread_create(&control_thread, NULL, &ControlPortThread, (void *) this_node); assert(rv==0);
+  rv = pthread_create(&data_thread, NULL, &DataPortThread, NULL); assert(rv==0);
+  rv = pthread_create(&control_thread, NULL, &ControlPortThread, NULL); assert(rv==0);
 
   rv = pthread_join(data_thread, NULL); assert(rv==0);
   rv = pthread_join(control_thread, NULL); assert(rv==0);  
@@ -129,8 +128,8 @@ int main(int argc, char **argv){
 
 void *DataPortThread(void *args){
 
-  Node *node_data = (Node *) args;
-
+  //Node *node_data = (Node *) args;
+  Node * node_data = this_node;
   int sd, rv;
 
   sd = socket(AF_INET, SOCK_DGRAM, 0); assert(sd > 0);
@@ -143,7 +142,7 @@ void *DataPortThread(void *args){
   sa.sin_addr.s_addr = htonl(INADDR_ANY);
   sa.sin_port = htons(node_data->GetDataPort());
 
-  rv = bind(sd, (struct sockaddr *) &sa, sizeof(sa)); cout << rv << endl;assert(rv ==0);
+  rv = bind(sd, (struct sockaddr *) &sa, sizeof(sa)); assert(rv ==0);
 
   fd_set master, read_fds;
   int fdmax = sd;
@@ -163,29 +162,75 @@ void *DataPortThread(void *args){
     tv.tv_sec = 5;
     tv.tv_usec = 500000;
 
+    
+    
     rv = select(fdmax+1, &read_fds, NULL, NULL, &tv);
     if(rv < 0) cout << "Select ERROR!" << endl;
-    else if(rv == 0) cout << "Timeout" << endl;
+    else if(rv == 0) cout << "...." << endl;
     else{
       ssize_t recsize;
       struct sockaddr_in node_addr;
       char recv_data[DSIZE];
+      unsigned int address_length = sizeof(struct sockaddr);
       
       if(FD_ISSET(sd, &read_fds)){
 	recsize = recvfrom(sd, recv_data, DSIZE, 0, (struct sockaddr *) &node_addr, &address_length);
-	cout << "\nSize of message " << recsize << endl;
 	int source_id = (int) recv_data[0];
 	int dest_id = (int) recv_data[1];
+	char * path = ((char *) recv_data) + 4;
 	int pid = (int) recv_data[2];
 	int TTL = (int) recv_data[3];
-	char * data = ((char *) recv_data) + 4;
+	if(TTL > 0){
+	 
+	  if(dest_id == node_data->GetID()){
+	    
+	    char * data = ((char *) recv_data) + 4 + 15;
+	    cout << "Source: " << source_id << ", Dest: " << dest_id << ", P-id: " << pid << ", TTL: " << TTL << endl;
+	    int k;
+	    cout << "Path: ";
+	    for(k = 0; k < 15; k++){
+	      if(path[k]){
+		cout << "Node " << (int) path[k] << "--->";
+	      }
+	    }
+	    cout <<"Node " << dest_id << endl;
+	    
+	    cout << "Data: " << data << endl;
+	  }
+	  else{
+	    Node * forward_to;
+	    int j,i;
+	    for(j=0;j<distance_vectors.size();j++){
+	      int to, next, hops;
+	      tie(to, next, hops) = distance_vectors[j];
+	      if(to == dest_id){
+		for(i=0; i < node_data->GetNeighbors().size();i++){
+		  if(node_data->GetNeighbors()[i]->GetID() == next){
+		    forward_to = node_data->GetNeighbors()[i];
+		  }
+		}
+	      }
+	    }
 
-	//type = 2;
-	cout << "Source: " << source_id << ", Dest: " << dest_id << ", P-id: " << pid << ", TTL: " << TTL << endl;
-	cout << "Data: " << data << endl;
+	    struct sockaddr_in f_addr;
+	    struct hostent *h = gethostbyname((const char *) forward_to->GetHostname().c_str());
+	    memcpy(&f_addr.sin_addr.s_addr, h->h_addr, h->h_length);
+	    f_addr.sin_family = AF_INET;
+	    f_addr.sin_port = htons(forward_to->GetDataPort());
+	    
+	    path[15-TTL] = node_data->GetID();
+	    recv_data[3] = TTL - 1;
+	    
+	    ssize_t sendsize = sendto(sd, recv_data, DSIZE, 0, (struct sockaddr *) &f_addr, address_length);
+	    cout << "Forwarding" << endl;
+	  }
+	}
+	else{
+	  cout << "TTL indicated that the packet was stuck in a loop...\nPacket Dropped" << endl;
+	}
       }
     }
-
+  
   }
 
   cout << "DataportThread" << endl;
@@ -196,7 +241,7 @@ void *DataPortThread(void *args){
 
 void *ControlPortThread(void *args){
 
-  Node *node_data = (Node *) args;
+  Node *node_data = this_node;
   //create socket
 
   int sd, rv;
@@ -290,7 +335,7 @@ void *ControlPortThread(void *args){
     
     rv = select(fdmax+1, &read_fds, NULL, NULL, &tv);
     if(rv < 0) cout << "Select ERROR!" << endl;
-    else if(rv == 0) cout << "Timeout" << endl;
+    else if(rv == 0) cout << "----" << endl;
     else{
       ssize_t recsize;
       struct sockaddr_in node_addr;
@@ -298,17 +343,17 @@ void *ControlPortThread(void *args){
 
       if(FD_ISSET(sd, &read_fds)){
 	recsize = recvfrom(sd, recv_data, CSIZE, 0, (struct sockaddr *) &node_addr, &address_length);
-	cout << "\nSize of message " << recsize << endl;
+	//cout << "\nSize of message " << recsize << endl;
 	int source_id = (int) recv_data[0];
 	int dest_id = (int) recv_data[1];
 	int type = (int) recv_data[2];
 	char * data = ((char *) recv_data) + 3;
 
 	//type = 2;
-	cout << "Source: " << source_id << ", Dest: " << dest_id << ", Type: " << type << endl;
-	cout << "Data: " << data << endl;
+	//cout << "Source: " << source_id << ", Dest: " << dest_id << ", Type: " << type << endl;
+	//cout << "Data: " << data << endl;
 	if(type == 1){
-
+	  cout << "Updating Distance Vectors" << endl;	
 	  //INDICTAES THIS NODE RECEIVED A DISTANCE VECTOR
 	  vector<tuple<int, int, int>> recvec;
 	  
@@ -336,12 +381,12 @@ void *ControlPortThread(void *args){
 	      tuple<int,int,int> temp;
 	      if(todv == to){
 		if(nextdv == next){
-		  temp = make_tuple(to, next ,hops+1);
-		  distance_vectors[k] = temp;
+		  //temp = make_tuple(to, next ,hops+1);
+		  //distance_vectors[k] = temp;
 		}
 		else{
 		  if(hopsdv > hops+1){
-		    cout << "In here where to: " << to << ", nextdv "  << nextdv << endl;
+		    //cout << "In here where to: " << to << ", nextdv "  << nextdv << endl;
 		
 		    temp = make_tuple(to, source_id, hops+1);
 		    distance_vectors[k] = temp;
@@ -355,14 +400,15 @@ void *ControlPortThread(void *args){
 	      distance_vectors.push_back(tup);
 	    }
 	  }
-	  cout << "DV: " << endl;
+	  /*
+	    cout << "DV: " << endl;
 	  for(j=0;j<distance_vectors.size();j++){
 	    int to, next, hops;
 	    tie(to, next, hops) = distance_vectors[j];
 	    cout << to << "," << next << "," << hops << "\n";
 	  
 	  }
-	  
+	  */
 	}
 	else if(type == 2){
 	  //generate packet
@@ -376,14 +422,14 @@ void *ControlPortThread(void *args){
 	  
 	  ssize_t sendsize;
 	  
-	  char buf[DSIZE];
+	  char buf[DSIZE] = "";;
 	  buf[0] = node_data->GetID();
 	  buf[1] = dest_id;
 	  buf[2] = packet_id++;
 	  buf[3] = 15;
 	  
 	  char * buf_ptr = (char *) buf;
-	  buf_ptr += 4;
+	  buf_ptr += 19;
 	  
 	  sv_ss.str("");
 
@@ -400,13 +446,65 @@ void *ControlPortThread(void *args){
 	
 	
 	else if(type == 3){
-	  //add link
+	  ifstream file("config.txt");
+
+	  file.clear();
+	  file.seekg(0, file.beg);
+
+	  string line;
+	  while(getline(file, line)){
+	    int id_, control_port_, data_port_;
+	    string hostname_;
+
+	    istringstream iss(line);
+
+	    string token;
+	    getline(iss,token,'\t');
+	    //cout << "" << stoi(token) << endl;
+	    id_ = stoi(token);
+	    if(id_ == dest_id){
+	      
+	      int count = 1;
+	      while(getline(iss,token,'\t')){
+		switch(count){
+		case 1:
+		  hostname_ = token;
+		  break;
+		case 2:
+		  control_port_ = stoi(token);
+		  break;
+		case 3:
+		  data_port_ = stoi(token);
+		  break;
+		}
+		count++;
+	      }
+	      Node * neighbor_node = new Node(id_, control_port_, data_port_, hostname_);
+	      rv = this_node->AddNeighbor(neighbor_node);
+	      if(rv == 0){
+		cout << "Added Link to Node " << dest_id << endl;
+	      }
+	      else{ cout << "A link already exists between this node and Node " << dest_id << endl; }
+	    }
+	  }
 	}
 	else if(type == 4){
-	  //remove link
-	}
-	else if(type == 5){
-	  //sent after node receives a request to add a link
+	  
+	  rv = node_data -> RemoveNeighbor(dest_id);
+	  if(rv == 0) cout << "Link to Node "<<dest_id << " Removed" << endl;
+	  else cout << "Link to Node "<< dest_id << " does not exist" << endl;
+
+	  //remove from DV
+	  int l;	
+	  for(l=0;l<distance_vectors.size();l++){
+	    int t, n, h;
+	    tie(t,n,h) = distance_vectors[l];
+	    if(t == dest_id){
+	      distance_vectors.erase(distance_vectors.begin() + l);
+	    }
+	  }
+	  
+	  
 	}
 	else{
 	  cout << "Control Could Not recognize packet type" << endl;

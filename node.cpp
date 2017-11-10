@@ -23,13 +23,31 @@ Node::Node(int id, int c_port, int d_port, std::string hname){
   data_port_ = d_port;
   hostname_ = hname;
 
-  cout << "Creating Node: " << id << " cport: " << c_port << " dport: " << d_port << " hostname: " << hname << endl;
+  //cout << "Creating Node: " << id << " cport: " << c_port << " dport: " << d_port << " hostname: " << hname << endl;
 }
 
 int Node::AddNeighbor(Node *neighbor){
-  neighbors_.push_back(neighbor);
-  cout << "Added Neighbor" << endl;
-  return 0;
+  int i;
+  int in = 0;
+  for(i=0;i<neighbors_.size(); i++){
+    if(neighbor->GetID() == neighbors_[i]->GetID()) in = 1;
+  }
+  if(in == 0){
+    neighbors_.push_back(neighbor);
+    return 0;
+  }
+  else{return -1;}
 }
 
-int Node::RemoveNeighbor(int id){return 0;}
+int Node::RemoveNeighbor(int id){
+  int i;
+  int in = 0;
+  for(i=0;i<neighbors_.size(); i++){
+    if(id  == neighbors_[i]->GetID()){
+      neighbors_.erase(neighbors_.begin() + i);
+      return 0;
+    }
+  }
+  return -1;
+ 
+}
