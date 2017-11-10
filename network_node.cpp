@@ -130,9 +130,69 @@ int main(int argc, char **argv){
 void *DataPortThread(void *args){
 
   Node *node_data = (Node *) args;
+
+  int sd, rv;
+
+  sd = socket(AF_INET, SOCK_DGRAM, 0); assert(sd > 0);
+
+  // bind socket to control port # from args
+
+  struct sockaddr_in sa;
+
+  sa.sin_family = AF_INET;
+  sa.sin_addr.s_addr = htonl(INADDR_ANY);
+  sa.sin_port = htons(node_data->GetDataPort());
+
+  rv = bind(sd, (struct sockaddr *) &sa, sizeof(sa)); cout << rv << endl;assert(rv ==0);
+
+  fd_set master, read_fds;
+  int fdmax = sd;
+
+  FD_ZERO(&master);
+  FD_ZERO(&read_fds);
+
+  FD_SET(sd, &master);
+
+  struct timeval tv;
+  unsigned int address_length = sizeof(struct sockaddr);
+
+  while(1){
+
+    read_fds = master;
+
+    tv.tv_sec = 5;
+    tv.tv_usec = 500000;
+
+    rv = select(fdmax+1, &read_fds, NULL, NULL, &tv);
+    if(rv < 0) cout << "Select ERROR!" << endl;
+    else if(rv == 0) cout << "Timeout" << endl;
+    else{
+      ssize_t recsize;
+      struct sockaddr_in node_addr;
+      char recv_data[DSIZE];
+      
+      if(FD_ISSET(sd, &read_fds)){
+	recsize = recvfrom(sd, recv_data, DSIZE, 0, (struct sockaddr *) &node_addr, &address_length);
+	cout << "\nSize of message " << recsize << endl;
+	int source_id = (int) recv_data[0];
+	int dest_id = (int) recv_data[1];
+	int pid = (int) recv_data[2];
+	int TTL = (int) recv_data[3];
+	char * data = ((char *) recv_data) + 4;
+
+	//type = 2;
+	cout << "Source: " << source_id << ", Dest: " << dest_id << ", P-id: " << pid << ", TTL: " << TTL << endl;
+	cout << "Data: " << data << endl;
+      }
+    }
+
+  }
+
   cout << "DataportThread" << endl;
   
 }
+
+
 
 void *ControlPortThread(void *args){
 
@@ -169,7 +229,21 @@ void *ControlPortThread(void *args){
 
   struct timeval tv;
   unsigned int address_length = sizeof(struct sockaddr);
+
+  //add myself to the DV
+  auto t1 = make_tuple(node_data->GetID(), -1, 0);
+  distance_vectors.push_back(t1);
   
+  string sv_str = "";
+  stringstream sv_ss(sv_str);
+  int j;
+  for(j=0;j<distance_vectors.size();j++){
+    int to, next, hops;
+    tie(to, next, hops) = distance_vectors[j];
+    sv_ss << to << "," << next << "," << hops << "\n";
+    //if(j != sendvec.size()-1) sv_ss << "\n";
+  }
+  int packet_id = 0;
   while(1){
     
     read_fds = master;
@@ -197,8 +271,18 @@ void *ControlPortThread(void *args){
        
 	char * buf_ptr = (char *) buf;
 	buf_ptr += 3;
+	sv_ss.str("");
+	//memcpy(buf_ptr, (void *) &sendvec, sizeof(sendvec));
+	for(j=0;j<distance_vectors.size();j++){
+ 	  int to, next, hops;
+	  tie(to, next, hops) = distance_vectors[j];
+	  sv_ss << to << "," << next << "," << hops << "\n";
+	  //if(j != sendvec.size()-1) sv_ss << "\n";
+	}
+
 	
-	sprintf(buf_ptr, "Hello there homie! From: %d", node_data->GetID());
+	
+	sprintf(buf_ptr, "%s", sv_ss.str().c_str());
 	sendsize = sendto(sd, buf, CSIZE, 0, (struct sockaddr *) &neighbor_addr, address_length);
       }
       prev = now;
@@ -210,7 +294,7 @@ void *ControlPortThread(void *args){
     else{
       ssize_t recsize;
       struct sockaddr_in node_addr;
-      char recv_data[1024];
+      char recv_data[CSIZE];
 
       if(FD_ISSET(sd, &read_fds)){
 	recsize = recvfrom(sd, recv_data, CSIZE, 0, (struct sockaddr *) &node_addr, &address_length);
@@ -219,12 +303,120 @@ void *ControlPortThread(void *args){
 	int dest_id = (int) recv_data[1];
 	int type = (int) recv_data[2];
 	char * data = ((char *) recv_data) + 3;
+
+	//type = 2;
 	cout << "Source: " << source_id << ", Dest: " << dest_id << ", Type: " << type << endl;
-	cout << data << endl;
-      }
-    }
-    
-  }
+	cout << "Data: " << data << endl;
+	if(type == 1){
+
+	  //INDICTAES THIS NODE RECEIVED A DISTANCE VECTOR
+	  vector<tuple<int, int, int>> recvec;
+	  
+	  istringstream dv_ss(data);
+	  string line;
+	  //	  int to, next, hops;
+	  while(getline(dv_ss, line)){
+	    string sto, snext, shops;
+	    istringstream line_ss(line);
+	    getline(line_ss, sto,',');
+	    getline(line_ss, snext,',');
+	    getline(line_ss, shops, ',');
+	    auto t = make_tuple(stoi(sto), stoi(snext), stoi(shops));
+	    recvec.push_back(t);
+	  }
+	  
+	  for(j=0;j<recvec.size();j++){
+	    int to, next, hops;
+	    tie(to, next, hops) = recvec[j];
+	    int in = 0;
+	    int k;
+	    for(k = 0; k < distance_vectors.size();k++){
+	      int todv, nextdv, hopsdv;
+	      tie(todv, nextdv, hopsdv) = distance_vectors[k];
+	      tuple<int,int,int> temp;
+	      if(todv == to){
+		if(nextdv == next){
+		  temp = make_tuple(to, next ,hops+1);
+		  distance_vectors[k] = temp;
+		}
+		else{
+		  if(hopsdv > hops+1){
+		    cout << "In here where to: " << to << ", nextdv "  << nextdv << endl;
+		
+		    temp = make_tuple(to, source_id, hops+1);
+		    distance_vectors[k] = temp;
+		  }
+		}
+		in = 1;
+	      }
+	    }
+	    if(in == 0){
+	      auto tup = make_tuple(to, source_id, hops+1);
+	      distance_vectors.push_back(tup);
+	    }
+	  }
+	  cout << "DV: " << endl;
+	  for(j=0;j<distance_vectors.size();j++){
+	    int to, next, hops;
+	    tie(to, next, hops) = distance_vectors[j];
+	    cout << to << "," << next << "," << hops << "\n";
+	  
+	  }
+	  
+	}
+	else if(type == 2){
+	  //generate packet
+	  //Send a packet with the correct to this nodes data port: it will handle forwarding
+	  struct sockaddr_in neighbor_addr;
+	  struct hostent *h = gethostbyname((const char *) node_data->GetHostname().c_str());
+	    
+	  memcpy(&neighbor_addr.sin_addr.s_addr, h->h_addr, h->h_length);
+	  neighbor_addr.sin_family = AF_INET;
+	  neighbor_addr.sin_port = htons(node_data->GetDataPort());
+	  
+	  ssize_t sendsize;
+	  
+	  char buf[DSIZE];
+	  buf[0] = node_data->GetID();
+	  buf[1] = dest_id;
+	  buf[2] = packet_id++;
+	  buf[3] = 15;
+	  
+	  char * buf_ptr = (char *) buf;
+	  buf_ptr += 4;
+	  
+	  sv_ss.str("");
+
+	  sv_ss << "GENERATED PACKET>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n";
+	    //memcpy(buf_ptr, (void *) &sendvec, sizeof(sendvec));
+	  for(j=0;j<900;j++){
+	    sv_ss << (char) ((j%90) + ' ');
+	  }
+	  
+	  //printf("%s", sv_ss.str().c_str());
+	  sprintf(buf_ptr, "%s", sv_ss.str().c_str());
+	  sendsize = sendto(sd, buf, DSIZE, 0, (struct sockaddr *) &neighbor_addr, address_length);
+	}
+	
+	
+	else if(type == 3){
+	  //add link
+	}
+	else if(type == 4){
+	  //remove link
+	}
+	else if(type == 5){
+	  //sent after node receives a request to add a link
+	}
+	else{
+	  cout << "Control Could Not recognize packet type" << endl;
+	  continue;
+	} 
+	
+
+      }//IF FD_ISSET
+    }//ELSE
+  }//WHILE(1)
   
   //wait for incoming messages
   //initially every .5 seconds each node will send its distsnce vectors for initialization

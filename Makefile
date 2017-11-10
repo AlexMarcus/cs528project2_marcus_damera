@@ -1,5 +1,5 @@
 NODESOURCES=node.cpp network_node.cpp
-CLIENTSOURCES=client.cpp
+CLIENTSOURCES=node.cpp client.cpp
 CC=g++
 EXEC=node client
 LDFLAGS= -pthread
